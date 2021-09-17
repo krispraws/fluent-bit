@@ -359,7 +359,7 @@ static int tls_net_read(struct flb_upstream_conn *u_conn,
         if (ret == SSL_ERROR_WANT_READ) {
             ret = FLB_TLS_WANT_READ;
         }
-        else if (ret < 0) {
+        else {
             ret = -1;
         }
     }
