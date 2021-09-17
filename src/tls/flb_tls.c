@@ -180,17 +180,18 @@ int flb_tls_net_read(struct flb_upstream_conn *u_conn, void *buf, size_t len)
     if (ret == FLB_TLS_WANT_READ) {
         goto retry_read;
     }
-    else if (ret < 0) {
-        return -1;
-    }
-    else if (ret == 0) {
-        return -1;
+    else if (ret <= 0) {
+        flb_error("[tls] net_read for fd=%i coro=%p returned non-retryable "
+                  "error: ret=%i",
+                  u_conn->fd, (void *) u_conn->coro, ret);
+        ret = -1;
     }
 
     return ret;
 }
 
-int flb_tls_net_read_async(struct flb_coro *co, struct flb_upstream_conn *u_conn,
+int flb_tls_net_read_async(struct flb_coro *co,
+                           struct flb_upstream_conn *u_conn,
                            void *buf, size_t len)
 {
     int ret;
@@ -204,11 +205,11 @@ int flb_tls_net_read_async(struct flb_coro *co, struct flb_upstream_conn *u_conn
         flb_coro_yield(co, FLB_FALSE);
         goto retry_read;
     }
-    else if (ret < 0) {
-        return -1;
-    }
-    else if (ret == 0) {
-        return -1;
+    else if (ret <= 0) {
+        flb_error("[tls] net_read_async for fd=%i coro=%p returned "
+                  "non-retryable error: ret=%i",
+                  u_conn->fd, (void *) u_conn->coro, ret);
+        ret = -1;
     }
 
     return ret;
@@ -230,21 +231,26 @@ retry_write:
     else if (ret == FLB_TLS_WANT_READ) {
         goto retry_write;
     }
-    else if (ret < 0) {
-        return -1;
+    else if (ret <= 0) {
+        flb_error("[tls] net_write for fd=%i coro=%p returned non-retryable "
+                  "error: ret=%i",
+                  u_conn->fd, (void *) u_conn->coro, ret);
+        ret = -1;
     }
-
-    /* Update counter and check if we need to continue writing */
-    total += ret;
-    if (total < len) {
-        goto retry_write;
+    else {
+        /* Update counter and check if we need to continue writing */
+        total += ret;
+        if (total < len) {
+            goto retry_write;
+        }
     }
 
     *out_len = total;
     return 0;
 }
 
-int flb_tls_net_write_async(struct flb_coro *co, struct flb_upstream_conn *u_conn,
+int flb_tls_net_write_async(struct flb_coro *co,
+                            struct flb_upstream_conn *u_conn,
                             const void *data, size_t len, size_t *out_len)
 {
     int ret;
@@ -266,16 +272,20 @@ int flb_tls_net_write_async(struct flb_coro *co, struct flb_upstream_conn *u_con
         flb_coro_yield(co, FLB_FALSE);
         goto retry_write;
     }
-    else if (ret < 0) {
-        return -1;
+    else if (ret <= 0) {
+        flb_error("[tls] net_write_async for fd=%i coro=%p returned "
+                  "non-retryable error: ret=%i",
+                  u_conn->fd, (void *) u_conn->coro, ret);
+        ret = -1;
     }
-
-    /* Update counter and check if we need to continue writing */
-    total += ret;
-    if (total < len) {
-        io_tls_event_switch(u_conn, MK_EVENT_WRITE);
-        flb_coro_yield(co, FLB_FALSE);
-        goto retry_write;
+    else {
+        /* Update counter and check if we need to continue writing */
+        total += ret;
+        if (total < len) {
+            io_tls_event_switch(u_conn, MK_EVENT_WRITE);
+            flb_coro_yield(co, FLB_FALSE);
+            goto retry_write;
+        }
     }
 
     *out_len = total;
@@ -297,8 +307,8 @@ int flb_tls_session_create(struct flb_tls *tls,
     /* Create TLS session */
     session = tls->api->session_create(tls, u_conn);
     if (!session) {
-        flb_error("[tls] could not create TLS session for %s:%i",
-                  u->tcp_host, u->tcp_port);
+        flb_error("[tls] could not create TLS session for %s:%i, fd=%i",
+                  u->tcp_host, u->tcp_port, u_conn->fd);
         return -1;
     }
 

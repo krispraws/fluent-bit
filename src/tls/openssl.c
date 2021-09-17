@@ -56,6 +56,61 @@ struct tls_session {
     struct tls_context *parent;    /* parent struct tls_context ref */
 };
 
+/*
+ * Short summary of error handling for OpenSSL apis
+ * ------------------------------------------------
+ * This applies to OpenSSL v1.1.0 as well as older versions.
+ * https://www.openssl.org/docs/man1.1.0/man3/SSL_get_error.html
+ *
+ * 1. Error details are stored in multiple places. Return codes from
+ * SSL_connect, SSL_read etc. must be passed to SSL_get_error to get the
+ * real failure error code. There is also an error queue per thread that
+ * contains more details and must be cleared before every SSL I/O call in order
+ * for SSL_get_error to work reliably. For SSL_ERROR_SYSCALL, errno may hold
+ * the real error code if the BIO is socket based.
+ *
+ * 2. The error codes returned from SSL_get_error can be positive and must be
+ * translated before returning it to callers that treat a positive value as
+ * success e.g. read and write functions that expect positive return values to
+ * be number of bytes read or written.
+ *
+ * 3. SSL_ERROR_WANT_READ and SSL_ERROR_WANT_WRITE can both be returned from
+ * any TLS/SSl I/O function.
+ */
+
+/*
+ * Callback for ERR_print_errors_cb to traverse the entire OpenSSL error queue.
+ * ERR_print_errors_cb also removes the entry from the queue.
+ */
+static int openssl_error_queue_callback(const char *err_str,
+                                        size_t err_str_len,
+                                        void *user_data)
+{
+    const char* log_prefix_str = user_data;
+
+    if (log_prefix_str) {
+        flb_error("[openssl] %s error queue entry=%.*s",
+                  log_prefix_str, err_str_len, err_str);
+    } else {
+        flb_error("[openssl] error queue entry=%.*s", err_str_len, err_str);
+    }
+    return 0;
+}
+
+/* Log and clear the OpenSSL error queue. Log errno in some cases. */
+static void log_non_retryable_openssl_error(const char* log_prefix, int ssl_err)
+{
+    char buf[256] = {0};
+
+    ERR_print_errors_cb(openssl_error_queue_callback, (void *) log_prefix);
+    /* Some error codes like SSL_ERROR_SYSCALL indicate that the real reason
+    may be in errno */
+    if (ssl_err == SSL_ERROR_SYSCALL) {
+        strerror_r(errno, buf, sizeof(buf) - 1);
+        flb_warn("[openssl] %s ssl_err=%i errno=%i err=%s",
+                 log_prefix, ssl_err, errno, buf);
+    }
+}
 
 static int tls_init(void)
 {
@@ -349,17 +404,28 @@ static int tls_net_read(struct flb_upstream_conn *u_conn,
     int ret;
     struct tls_session *session = (struct tls_session *) u_conn->tls_session;
     struct tls_context *ctx;
+    int ssl_err = SSL_ERROR_NONE;
+    int fd = -1;
+    char log_prefix[256] = {0};
 
     ctx = session->parent;
     pthread_mutex_lock(&ctx->mutex);
 
+    /* Clear the current thread's error queue */
+    ERR_clear_error();
+    fd = SSL_get_fd(session->ssl);
+    snprintf(log_prefix, sizeof(log_prefix) - 1, "[fd=%i] SSL_read", fd);
+
     ret = SSL_read(session->ssl, buf, len);
     if (ret <= 0) {
-        ret = SSL_get_error(session->ssl, ret);
-        if (ret == SSL_ERROR_WANT_READ) {
+        ssl_err = SSL_get_error(session->ssl, ret);
+
+        if (ssl_err == SSL_ERROR_WANT_READ) {
             ret = FLB_TLS_WANT_READ;
         }
         else {
+            flb_error("[openssl] %s non-retryable error: ret=%i, ssl_err=%i", log_prefix, ret, ssl_err);
+            log_non_retryable_openssl_error(log_prefix, ssl_err);
             ret = -1;
         }
     }
@@ -375,22 +441,30 @@ static int tls_net_write(struct flb_upstream_conn *u_conn,
     size_t total = 0;
     struct tls_session *session = (struct tls_session *) u_conn->tls_session;
     struct tls_context *ctx;
+    int ssl_err = SSL_ERROR_NONE;
+    int fd = -1;
+    char log_prefix[256] = {0};
 
     ctx = session->parent;
     pthread_mutex_lock(&ctx->mutex);
+
+    /* Clear the current thread's error queue */
+    ERR_clear_error();
+    fd = SSL_get_fd(session->ssl);
+    snprintf(log_prefix, sizeof(log_prefix) - 1, "[fd=%i] SSL_write", fd);
 
     ret = SSL_write(session->ssl,
                     (unsigned char *) data + total,
                     len - total);
     if (ret <= 0) {
-        ret = SSL_get_error(session->ssl, ret);
-        if (ret == SSL_ERROR_WANT_WRITE) {
+        ssl_err = SSL_get_error(session->ssl, ret);
+        if (ssl_err == SSL_ERROR_WANT_WRITE) {
             ret = FLB_TLS_WANT_WRITE;
-        }
-        else if (ret == SSL_ERROR_WANT_READ) {
+        } else if (ssl_err == SSL_ERROR_WANT_READ) {
             ret = FLB_TLS_WANT_READ;
-        }
-        else {
+        } else {
+            flb_error("[openssl] %s non-retryable error: ret=%i, ssl_err=%i", log_prefix, ret, ssl_err);
+            log_non_retryable_openssl_error(log_prefix, ssl_err);
             ret = -1;
         }
     }
@@ -406,9 +480,17 @@ static int tls_net_handshake(struct flb_tls *tls, void *ptr_session)
     int ret = 0;
     struct tls_session *session = ptr_session;
     struct tls_context *ctx;
+    int ssl_err = SSL_ERROR_NONE;
+    int fd = -1;
+    char log_prefix[256] = {0};
 
     ctx = session->parent;
     pthread_mutex_lock(&ctx->mutex);
+
+    /* Clear the current thread's error queue */
+    ERR_clear_error();
+    fd = SSL_get_fd(session->ssl);
+    snprintf(log_prefix, sizeof(log_prefix) - 1, "[fd=%i] SSL_connect", fd);
 
     if (tls->vhost) {
         SSL_set_tlsext_host_name(session->ssl, tls->vhost);
@@ -416,27 +498,26 @@ static int tls_net_handshake(struct flb_tls *tls, void *ptr_session)
 
     ret = SSL_connect(session->ssl);
     if (ret != 1) {
-        ret = SSL_get_error(session->ssl, ret);
-        if (ret != SSL_ERROR_WANT_READ &&
-            ret != SSL_ERROR_WANT_WRITE) {
-            ret = SSL_get_error(session->ssl, ret);
-            pthread_mutex_unlock(&ctx->mutex);
-            return -1;
+        ssl_err = SSL_get_error(session->ssl, ret);
+        if (ssl_err == SSL_ERROR_WANT_WRITE) {
+            ret = FLB_TLS_WANT_WRITE;
         }
-
-        if (ret == SSL_ERROR_WANT_WRITE) {
-            pthread_mutex_unlock(&ctx->mutex);
-            return FLB_TLS_WANT_WRITE;
+        else if (ssl_err == SSL_ERROR_WANT_READ) {
+            ret = FLB_TLS_WANT_READ;
         }
-        else if (ret == SSL_ERROR_WANT_READ) {
-            pthread_mutex_unlock(&ctx->mutex);
-            return FLB_TLS_WANT_READ;
+        else {
+            flb_error("[openssl] %s non-retryable error: ret=%i, ssl_err=%i", log_prefix, ret, ssl_err);
+            log_non_retryable_openssl_error(log_prefix, ssl_err);
+            ret = -1;
         }
+    }
+    else {
+        flb_trace("[openssl] %s connection and handshake OK", log_prefix);
+        ret = 0;
     }
 
     pthread_mutex_unlock(&ctx->mutex);
-    flb_trace("[tls] connection and handshake OK");
-    return 0;
+    return ret;
 }
 
 /* OpenSSL backend registration */
