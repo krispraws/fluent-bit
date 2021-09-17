@@ -194,6 +194,7 @@ static void *tls_context_create(int verify, int debug,
     ctx = flb_calloc(1, sizeof(struct tls_context));
     if (!ctx) {
         flb_errno();
+        SSL_CTX_free(ssl_ctx);
         return NULL;
     }
     ctx->ctx = ssl_ctx;
@@ -293,7 +294,7 @@ static void *tls_session_create(struct flb_tls *tls,
     ssl = SSL_new(ctx->ctx);
 
     if (!ssl) {
-        flb_error("[openssl] could create new SSL context");
+        flb_error("[openssl] could not create new SSL context");
         flb_free(session);
         pthread_mutex_unlock(&ctx->mutex);
         return NULL;
@@ -332,7 +333,6 @@ static int tls_session_destroy(void *session)
     pthread_mutex_lock(&ctx->mutex);
 
     if (flb_socket_error(ptr->fd) == 0) {
-        SSL_shutdown(ptr->ssl);
         SSL_shutdown(ptr->ssl);
     }
     SSL_free(ptr->ssl);
