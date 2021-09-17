@@ -221,6 +221,7 @@ static void *tls_context_create(int verify, int debug,
     int ret;
     SSL_CTX *ssl_ctx;
     struct tls_context *ctx;
+    unsigned long sslq_err = 0;
 
     /*
      * Init library ? based in the documentation on OpenSSL >= 1.1.0 is not longer
@@ -268,20 +269,22 @@ static void *tls_context_create(int verify, int debug,
     if (ca_path) {
         ret = SSL_CTX_load_verify_locations(ctx->ctx, NULL, ca_path);
         if (ret != 1) {
+            sslq_err = ERR_get_error();
             flb_error("[tls] ca_path'%s' %lu: %s",
                       ca_path,
-                      ERR_get_error(),
-                      ERR_error_string(ERR_get_error(), NULL));
+                      sslq_err,
+                      ERR_error_string(sslq_err, NULL));
             goto error;
         }
     }
     else if (ca_file) {
         ret = SSL_CTX_load_verify_locations(ctx->ctx, ca_file, NULL);
         if (ret != 1) {
+            sslq_err = ERR_get_error();
             flb_error("[tls] ca_file '%s' %lu: %s",
                       ca_file,
-                      ERR_get_error(),
-                      ERR_error_string(ERR_get_error(), NULL));
+                      sslq_err,
+                      ERR_error_string(sslq_err, NULL));
             goto error;
         }
     }
@@ -293,10 +296,11 @@ static void *tls_context_create(int verify, int debug,
     if (crt_file) {
         ret = SSL_CTX_use_certificate_chain_file(ssl_ctx, crt_file);
 		if (ret != 1) {
+            sslq_err = ERR_get_error();
             flb_error("[tls] crt_file '%s' %lu: %s",
                       crt_file,
-                      ERR_get_error(),
-                      ERR_error_string(ERR_get_error(), NULL));
+                      sslq_err,
+                      ERR_error_string(sslq_err, NULL));
             goto error;
         }
     }
@@ -310,10 +314,11 @@ static void *tls_context_create(int verify, int debug,
         ret = SSL_CTX_use_PrivateKey_file(ssl_ctx, key_file,
                                           SSL_FILETYPE_PEM);
         if (ret != 1) {
+            sslq_err = ERR_get_error();
             flb_error("[tls] key_file '%s' %lu: %s",
                       key_file,
-                      ERR_get_error(),
-                      ERR_error_string(ERR_get_error(), NULL));
+                      sslq_err,
+                      ERR_error_string(sslq_err, NULL));
         }
 
         /* Make sure the key and certificate file match */
