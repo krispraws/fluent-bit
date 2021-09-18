@@ -428,6 +428,9 @@ static int tls_net_read(struct flb_upstream_conn *u_conn,
         if (ssl_err == SSL_ERROR_WANT_READ) {
             ret = FLB_TLS_WANT_READ;
         }
+        else if (ssl_err == SSL_ERROR_WANT_WRITE) {
+            ret = FLB_TLS_WANT_WRITE;
+        }
         else {
             flb_error("[openssl] %s non-retryable error: ret=%i, ssl_err=%i", log_prefix, ret, ssl_err);
             log_non_retryable_openssl_error(log_prefix, ssl_err);

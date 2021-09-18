@@ -205,6 +205,12 @@ int flb_tls_net_read_async(struct flb_coro *co,
         flb_coro_yield(co, FLB_FALSE);
         goto retry_read;
     }
+    else if (ret == FLB_TLS_WANT_WRITE) {
+        u_conn->coro = co;
+        io_tls_event_switch(u_conn, MK_EVENT_READ);
+        flb_coro_yield(co, FLB_FALSE);
+        goto retry_read;
+    }
     else if (ret <= 0) {
         flb_error("[tls] net_read_async for fd=%i coro=%p returned "
                   "non-retryable error: ret=%i",
