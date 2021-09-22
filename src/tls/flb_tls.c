@@ -180,6 +180,9 @@ int flb_tls_net_read(struct flb_upstream_conn *u_conn, void *buf, size_t len)
     if (ret == FLB_TLS_WANT_READ) {
         goto retry_read;
     }
+    else if (ret == FLB_TLS_WANT_WRITE) {
+        goto retry_read;
+    }
     else if (ret <= 0) {
         flb_error("[tls] net_read for fd=%i coro=%p returned non-retryable "
                   "error: ret=%i",
