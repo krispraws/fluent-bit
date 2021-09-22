@@ -817,8 +817,10 @@ int put_record_batch(struct flb_firehose *ctx, struct flush *buf,
     flb_sds_t error;
     int failed_records = 0;
 
-    flb_plg_debug(ctx->ins, "Sending log records to delivery stream %s",
-                  ctx->delivery_stream);
+    flb_plg_debug(ctx->ins, "[delay-test][put_batch_record] Sending %d log records; %zu bytes to delivery stream %s", num_records, payload_size, ctx->delivery_stream);
+
+ 
+    clock_t request_time = clock();
 
     if (plugin_under_test() == FLB_TRUE) {
         c = mock_http_call("TEST_PUT_RECORD_BATCH_ERROR");
@@ -830,17 +832,30 @@ int put_record_batch(struct flb_firehose *ctx, struct flush *buf,
                                                     &put_record_batch_header, 1);
     }
 
+    request_time = clock() - request_time;
+    double request_seconds = ((double)request_time / CLOCKS_PER_SEC);
+    flb_debug("[delay-test][put_batch_record] firehose response took time=%.3f seconds to send %d records:", request_seconds, num_records);
+
+    clock_t response_process_time = clock();
     if (c) {
         flb_plg_debug(ctx->ins, "PutRecordBatch http status=%d", c->resp.status);
 
         if (c->resp.status == 200) {
             /* Firehose API can return partial success- check response */
             if (c->resp.payload_size > 0) {
+                clock_t response_process_time_200 = clock();
                 failed_records = process_api_response(ctx, c);
+
+                response_process_time_200 = clock() - response_process_time_200;
+                double response_process_seconds_200 = ((double)response_process_time_200 / CLOCKS_PER_SEC);
+
+                flb_debug("[delay-test][put_batch_record][resp_payload_size %zu] http_client took time=%.6f seconds to process the response for %d records", c->resp.payload_size, response_process_seconds_200, num_records);
+
                 if (failed_records < 0) {
                     flb_plg_error(ctx->ins, "PutRecordBatch response "
                                   "could not be parsed, %s",
                                   c->resp.payload);
+                    // flb_debug("[delay-test][put_batch_record] http_client took time=%.3f seconds to process the response for %d records", response_process_seconds, num_records);
                     flb_http_client_destroy(c);
                     return -1;
                 }
@@ -848,6 +863,7 @@ int put_record_batch(struct flb_firehose *ctx, struct flush *buf,
                     flb_plg_error(ctx->ins, "PutRecordBatch request returned "
                                   "with no records successfully recieved, %s",
                                   ctx->delivery_stream);
+                    //flb_debug("[delay-test][put_batch_record] http_client took time=%.3f seconds to process the response for %d records", response_process_seconds, num_records);
                     flb_http_client_destroy(c);
                     return -1;
                 }
@@ -856,10 +872,18 @@ int put_record_batch(struct flb_firehose *ctx, struct flush *buf,
                                   "delivered, will retry this batch, %s",
                                   failed_records, num_records,
                                   ctx->delivery_stream);
+                    //flb_debug("[delay-test][put_batch_record] http_client took time=%.3f seconds to process the response for %d records", response_process_seconds, num_records);
                     flb_http_client_destroy(c);
                     return -1;
                 }
+                //flb_debug("[delay-test][put_batch_record] http_client took time=%.3f seconds to process the response for %d records", response_process_seconds, num_records);
+            } else {
+                response_process_time = clock() - response_process_time;
+                double response_process_seconds = ((double)response_process_time / CLOCKS_PER_SEC);
+
+                flb_debug("[delay-test][put_batch_record][payload_size %zu] http_client took time=%.3f seconds to process the response for %d records", c->resp.payload_size, response_process_seconds, num_records);
             }
+
             flb_plg_debug(ctx->ins, "Sent events to %s", ctx->delivery_stream);
             flb_http_client_destroy(c);
             return 0;
@@ -894,6 +918,11 @@ int put_record_batch(struct flb_firehose *ctx, struct flush *buf,
     }
 
     flb_plg_error(ctx->ins, "Failed to send log records to %s", ctx->delivery_stream);
+
+    response_process_time = clock() - response_process_time;
+    double response_process_seconds = ((double)response_process_time / CLOCKS_PER_SEC);
+    flb_debug("[delay-test][put_batch_record][failed call] http_client took time=%.6f seconds to process the response for %d records", response_process_seconds, num_records);
+
     if (c) {
         flb_http_client_destroy(c);
     }
