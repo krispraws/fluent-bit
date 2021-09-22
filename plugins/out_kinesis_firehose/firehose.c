@@ -50,6 +50,9 @@ static struct flb_aws_header content_type_header = {
     .val_len = 26,
 };
 
+static int firehose_flush_counter = 0;
+static int firehose_flush_response_counter = 0;
+
 static int cb_firehose_init(struct flb_output_instance *ins,
                               struct flb_config *config, void *data)
 {
@@ -323,7 +326,15 @@ static void cb_firehose_flush(const void *data, size_t bytes,
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
 
+    firehose_flush_counter++;
+    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] chunk_arrived %d", firehose_flush_counter);
+    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] incoming chunk size: %d", bytes);
+
     ret = process_and_send_records(ctx, buf, data, bytes);
+
+    firehose_flush_response_counter++;
+    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] got final response from Firehose for chunk %d", firehose_flush_response_counter);
+
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Failed to send records");
         flush_destroy(buf);

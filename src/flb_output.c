@@ -41,6 +41,7 @@
 #include <fluent-bit/flb_pack.h>
 
 FLB_TLS_DEFINE(struct flb_out_coro_params, out_coro_params);
+static int flush_counter = 0;
 
 void flb_output_prepare()
 {
@@ -182,6 +183,9 @@ int flb_output_task_flush(struct flb_task *task,
                           struct flb_output_instance *out_ins,
                           struct flb_config *config)
 {
+    flush_counter++;
+    flb_debug("[firehose-delay-test][flb_output.c]f[lb_output_task_flush] engine is flusing chunk to firehose: %d", flush_counter);
+
     int ret;
     struct flb_output_coro *out_coro;
 
