@@ -351,6 +351,14 @@ static int process_content(struct flb_tail_file *file, size_t *bytes)
 #endif
 
     go_next:
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+        {
+            struct flb_input_file_segment *seg = ctx->ins->debug_info.last_file_segment;
+            if (seg != NULL && lines == 0 && has_data) {
+                strncpy(seg->first_log_record, line, sizeof(seg->first_log_record));
+            }
+        }
+#endif
         flb_free(repl_line);
         repl_line = NULL;
         /* Adjust counters */
@@ -361,6 +369,17 @@ static int process_content(struct flb_tail_file *file, size_t *bytes)
     }
     file->parsed = file->buf_len;
 
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    {
+        struct flb_input_file_segment *seg = ctx->ins->debug_info.last_file_segment;
+        if (seg != NULL && has_data) {
+            struct flb_time pack_time;
+            flb_time_get(&pack_time);
+            seg->pack_time = flb_time_to_double(&pack_time);
+            seg->num_records = lines;
+        }
+    }
+#endif
     if (has_data) {
         /* Append buffer content to a chunk */
         *bytes = processed_bytes;
@@ -926,6 +945,10 @@ int flb_tail_file_chunk(struct flb_tail_file *file)
     /* Check if we the engine issued a pause */
     ctx = file->config;
     if (flb_input_buf_paused(ctx->ins) == FLB_TRUE) {
+        flb_debug("[tail][data_trace] flb_tail_file_chunk: won't read more data because input is paused. vals=[file_fd=%d, file_buf=%p, file_buf_size=%zu, file_buf_len=%zu]", file->fd, file->buf_data, file->buf_size, file->buf_len);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW        
+        ctx->ins->debug_info.inotify_ignored_counter++;
+#endif        
         return FLB_TAIL_BUSY;
     }
 
@@ -980,6 +1003,26 @@ int flb_tail_file_chunk(struct flb_tail_file *file)
 
     bytes = read(file->fd, file->buf_data + file->buf_len, capacity);
     if (bytes > 0) {
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+        {
+            struct flb_time inotify_time, file_mtime, read_time;
+            struct flb_input_file_segment *seg = ctx->ins->debug_info.last_file_segment;
+            if (seg == NULL) {
+                /* we came here via a pending signal, not an inotify event*/
+                seg = flb_calloc(1, sizeof(struct flb_input_file_segment));
+                seg->pending_signal = FLB_TRUE;
+                seg->file_fd = file->fd;
+                seg->file_inode = file->inode;
+                flb_time_get(&inotify_time);
+                seg->inotify_time = flb_time_to_double(&inotify_time);
+                seg->file_mtime = seg->inotify_time;
+                ctx->ins->debug_info.last_file_segment = seg;
+            }
+            seg->num_bytes = bytes;
+            flb_time_get(&read_time);
+            seg->read_time = flb_time_to_double(&read_time);
+        }
+#endif        
         /* we read some data, let the content processor take care of it */
         file->buf_len += bytes;
         file->buf_data[file->buf_len] = '\0';
@@ -997,7 +1040,6 @@ int flb_tail_file_chunk(struct flb_tail_file *file)
                           file->inode, file->name);
             return FLB_TAIL_ERROR;
         }
-
 
         /* Adjust the file offset and buffer */
         file->offset += processed_bytes;
@@ -1020,12 +1062,15 @@ int flb_tail_file_chunk(struct flb_tail_file *file)
             /* adjust file counters, returns FLB_TAIL_OK or FLB_TAIL_ERROR */
             ret = adjust_counters(ctx, file);
         }
+        flb_debug("[tail][data_trace] flb_tail_file_chunk: new data read. vals=[file_fd=%d, file_buf=%p, file_buf_size=%zu, new_file_buf_len=%zu, new_bytes_read=%zu, proc_bytes=%lu, file_size=%zu, file_pending=%lu, ret=%d]", file->fd, file->buf_data, file->buf_size, file->buf_len, bytes, processed_bytes, file->size, file->pending_bytes, ret);
+
         /* Data was consumed but likely some bytes still remain */
         return ret;
     }
     else if (bytes == 0) {
         /* We reached the end of file, let's wait for some incoming data */
         ret = adjust_counters(ctx, file);
+        flb_debug("[tail][data_trace] flb_tail_file_chunk: no new data read, wait. vals=[file_fd=%d, file_buf=%p, file_buf_size=%zu, new_file_buf_len=%zu, new_bytes_read=%zu, file_size=%zu, file_pending=%lu, ret=%d]", file->fd, file->buf_data, file->buf_size, file->buf_len, bytes, file->size, file->pending_bytes, ret);        
         if (ret == FLB_TAIL_OK) {
             return FLB_TAIL_WAIT;
         }

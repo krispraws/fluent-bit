@@ -184,7 +184,7 @@ int flb_output_task_flush(struct flb_task *task,
                           struct flb_config *config)
 {
     flush_counter++;
-    flb_debug("[firehose-delay-test][flb_output.c]f[lb_output_task_flush] engine is flusing chunk to firehose: %d", flush_counter);
+    flb_debug("[output][data_trace][chunk_ptr=%p][task_id=%i] flb_output_task_flush: engine is flushing task=%i, chunk=(%s), size=%zu to firehose", task->ic, task->id, task->id, flb_input_chunk_get_name(task->ic), task->size);
 
     int ret;
     struct flb_output_coro *out_coro;

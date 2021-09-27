@@ -319,6 +319,8 @@ static void cb_firehose_flush(const void *data, size_t bytes,
     struct flush *buf;
     (void) i_ins;
     (void) config;
+    struct flb_coro *coro = NULL;
+    struct flb_output_coro *out_coro = NULL;
 
     buf = new_flush_buffer();
     if (!buf) {
@@ -326,14 +328,22 @@ static void cb_firehose_flush(const void *data, size_t bytes,
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
 
+    coro = flb_coro_get();
+    if (coro != NULL && coro->data != NULL) {
+        struct flb_output_coro *out_coro = (struct flb_output_coro *) coro->data;
+        flb_debug("[output][data_trace][chunk_ptr=%p][task_id=%i] cb_firehose_flush: processing task=%i, chunk=(%s), size=%zu to firehose", out_coro->task->ic, out_coro->task->id, out_coro->task->id, flb_input_chunk_get_name(out_coro->task->ic),  out_coro->task->size);
+    }
+
     firehose_flush_counter++;
-    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] chunk_arrived %d", firehose_flush_counter);
-    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] incoming chunk size: %d", bytes);
 
     ret = process_and_send_records(ctx, buf, data, bytes);
 
+    if (coro != NULL && coro->data != NULL) {
+        struct flb_output_coro *out_coro = (struct flb_output_coro *) coro->data;
+        flb_debug("[output][data_trace][chunk_ptr=%p][task_id=%i] cb_firehose_flush: response created for task=%i, chunk=(%s): records_processed=%i, records_sent=%i, ret=%i", out_coro->task->ic, out_coro->task->id, out_coro->task->id, flb_input_chunk_get_name(out_coro->task->ic), buf->records_processed, buf->records_sent, ret);
+    }
+
     firehose_flush_response_counter++;
-    flb_debug("[firehose-delay-test][firehose.c][cb_firehose_flush] got final response from Firehose for chunk %d", firehose_flush_response_counter);
 
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Failed to send records");

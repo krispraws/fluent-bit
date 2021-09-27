@@ -204,6 +204,9 @@ struct flb_input_instance *flb_input_new(struct flb_config *config,
         instance->mem_chunks_size = 0;
 
         mk_list_add(&instance->_head, &config->inputs);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+        memset(&instance->debug_info, 0, sizeof(struct flb_input_debug_info));
+#endif
     }
 
     return instance;
@@ -827,6 +830,9 @@ int flb_input_pause_all(struct flb_config *config)
             paused++;
         }
         in->mem_buf_status = FLB_INPUT_PAUSED;
+#ifdef FLB_TRACE_DATA_FLOW
+        in->debug_info.mem_pause_counter++;
+#endif
     }
 
     return paused;

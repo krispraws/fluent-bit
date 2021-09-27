@@ -188,6 +188,9 @@ option(FLB_FILTER_GEOIP2      "Enable geoip2 filter"                Yes)
 # Debug callbacks
 option(FLB_HTTP_CLIENT_DEBUG  "Enable HTTP Client debug callbacks"   No)
 
+# End to end data tracing
+option(FLB_TRACE_DATA_FLOW    "Enable end to end tracing for data"   No)
+
 # Enable all features
 if(FLB_ALL)
   # Global
@@ -252,6 +255,10 @@ if (FLB_TESTS_OSSFUZZ)
   FLB_DEFINITION(FLB_HAVE_TESTS_OSSFUZZ)
 endif()
 
+if(FLB_TRACE_DATA_FLOW)
+  FLB_DEFINITION(FLB_HAVE_TRACE_DATA_FLOW)
+endif()
+  
 # Set Fluent Bit dependency libraries path
 include(cmake/libraries.cmake)
 

@@ -157,6 +157,10 @@ static inline int handle_output_event(flb_pipefd_t fd, struct flb_config *config
     task_id = FLB_TASK_ID(key);
     out_id  = FLB_TASK_OUT(key);
 
+#ifdef FLB_HAVE_DATA_TRACE_FLOW
+    flb_debug("[engine][data_trace] handle_output_event: received task result (0=ERROR, 1=OK, 2=RETRY) for vals=[task_id=%i, out_id=%i, return=%i]", task_id, out_id, ret);
+#endif    
+
 #ifdef FLB_HAVE_TRACE
     char *trace_st = NULL;
 

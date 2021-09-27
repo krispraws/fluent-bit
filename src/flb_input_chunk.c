@@ -539,6 +539,10 @@ struct flb_input_chunk *flb_input_chunk_create(struct flb_input_instance *in,
     }
 
     flb_hash_add(in->ht_chunks, tag, tag_len, ic, 0);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    ic->num_segments = 0;
+    mk_list_init(&ic->segments);
+#endif
     return ic;
 }
 
@@ -609,6 +613,19 @@ int flb_input_chunk_destroy(struct flb_input_chunk *ic, int del)
 
     cio_chunk_close(ic->chunk, del);
     mk_list_del(&ic->_head);
+#ifdef FLB_HAVE_DATA_TRACE_FLOW
+{
+    struct mk_list *shead;
+    struct mk_list *stmp;
+    struct flb_input_file_segment *seg = NULL;
+
+    mk_list_foreach_safe(shead, stmp, &ic->segments) {
+        seg = mk_list_entry(shead, struct flb_input_file_segment, _head);
+        mk_list_del(&seg->_head);
+        flb_free(seg);
+    }
+}
+#endif
     flb_free(ic);
 
     return 0;
@@ -725,6 +742,9 @@ size_t flb_input_chunk_set_limits(struct flb_input_instance *in)
         flb_input_buf_paused(in) && in->config->is_running == FLB_TRUE &&
         in->config->is_ingestion_active == FLB_TRUE) {
         in->mem_buf_status = FLB_INPUT_RUNNING;
+#ifdef FLB_HAVE_TRACE_DATA_FLOW        
+        in->debug_info.mem_resume_counter++;
+#endif
         if (in->p->cb_resume) {
             in->p->cb_resume(in->context, in->config);
             flb_info("[input] %s resume (mem buf overlimit)",
@@ -750,6 +770,9 @@ static inline int flb_input_chunk_protect(struct flb_input_instance *i)
             }
         }
         i->mem_buf_status = FLB_INPUT_PAUSED;
+#ifdef FLB_HAVE_TRACE_DATA_FLOW        
+        i->debug_info.mem_pause_counter++;
+#endif
         return FLB_TRUE;
     }
 
@@ -830,11 +853,24 @@ int flb_input_chunk_append_raw(struct flb_input_instance *in,
     size_t pre_size;
     struct flb_input_chunk *ic;
     struct flb_storage_input *si;
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    struct flb_input_file_segment *seg = NULL;
+#endif
+
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    seg = in->debug_info.last_file_segment;
+#endif
 
     /* Check if the input plugin has been paused */
     if (flb_input_buf_paused(in) == FLB_TRUE) {
         flb_debug("[input chunk] %s is paused, cannot append records",
                   in->name);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+        if (seg != NULL) {
+            flb_warn("[input][data_trace] flb_input_chunk_append_raw: cannot append segment %p to a chunk because of memory limits. vals = [seg_ptr=%p, seg_fd=%d, seg_bytes=%d, seg_records=%d, seg_first_record=%s]",
+            seg, seg->file_fd, seg->num_bytes, seg->num_records, seg->first_log_record);
+        }
+#endif
         return -1;
     }
 
@@ -890,14 +926,38 @@ int flb_input_chunk_append_raw(struct flb_input_instance *in,
      */
     pre_size = cio_chunk_get_content_size(ic->chunk);
 
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    if (seg != NULL) {
+        in->debug_info.last_chunk_written = ic;
+    }   
+#endif
     /* Write the new data */
     ret = flb_input_chunk_write(ic, buf, buf_size);
     if (ret == -1) {
         flb_error("[input chunk] error writing data from %s instance",
                   in->name);
         cio_chunk_tx_rollback(ic->chunk);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    if (seg != NULL) {
+        in->debug_info.last_chunk_written = NULL;
+    }   
+#endif
         return -1;
     }
+
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    if (seg != NULL) {
+        ic->num_segments++;
+        mk_list_add(&seg->_head, &ic->segments);
+
+        flb_sds_t chunk_name = flb_input_chunk_get_name(ic);
+        flb_debug("[input][data_trace][chunk_ptr=%p] flb_input_chunk_append_raw: Added segment %p to chunk %s. vals= [seg_ptr=%p, seg_fd=%d, seg_bytes=%d, seg_records=%d, seg_first_record=(%s), chunk_ptr=%p, new_chunk=%d, chunk_size=%zu, chunk_segments=%d]",
+        ic, seg, chunk_name, seg, seg->file_fd, seg->num_bytes, seg->num_records, seg->first_log_record, ic, new_chunk, flb_input_chunk_get_size(ic), ic->num_segments);
+
+        flb_debug("[input][data_trace][chunk_ptr=%p] flb_input_chunk_append_raw: timing for segment vals=[seg_ptr=%p, seg_fd=%d, seg_bytes=%d, seg_records=%d, pending_signal=%d, inotify_time=%.9f, mtime=%.9f, read_time=%.9f, pack_time=%.9f]",
+        ic, seg, seg->file_fd, seg->num_bytes, seg->num_records, seg->pending_signal, seg->inotify_time, seg->file_mtime, seg->read_time, seg->pack_time);
+    }
+#endif
 
     /* Update 'input' metrics */
 #ifdef FLB_HAVE_METRICS

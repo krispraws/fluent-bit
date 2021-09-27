@@ -58,6 +58,18 @@
 #define FLB_INPUT_RUNNING     1
 #define FLB_INPUT_PAUSED      0
 
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+struct flb_input_debug_info {
+    int bp_pause_counter;
+    int bp_resume_counter;
+    int mem_pause_counter;
+    int mem_resume_counter;
+    int inotify_ignored_counter;
+    struct flb_input_file_segment *last_file_segment;
+    struct flb_input_chunk *last_chunk_written;
+};
+#endif
+
 struct flb_input_instance;
 
 struct flb_input_plugin {
@@ -247,6 +259,10 @@ struct flb_input_instance {
 
     /* Keep a reference to the original context this instance belongs to */
     struct flb_config *config;
+
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    struct flb_input_debug_info debug_info;
+#endif
 };
 
 struct flb_input_collector {

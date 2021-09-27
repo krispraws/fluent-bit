@@ -264,8 +264,36 @@ static int tail_fs_event(struct flb_input_instance *ins,
         }
     }
 
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    {
+        struct flb_input_file_segment *seg = flb_calloc(1, sizeof(struct flb_input_file_segment));
+        seg->file_fd = file->fd;
+        seg->file_inode = file->inode;
+        struct flb_time inotify_time, file_mtime;
+        flb_time_get(&inotify_time);
+        seg->inotify_time = flb_time_to_double(&inotify_time);
+        flb_time_set(&file_mtime, st.st_mtim.tv_sec, st.st_mtim.tv_nsec);
+        seg->file_mtime = flb_time_to_double(&file_mtime);
+        seg->pending_signal = FLB_FALSE;
+        ctx->ins->debug_info.last_file_segment = seg;
+    }
+#endif
+
     /* Collect the data */
     ret = in_tail_collect_event(file, config);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW        
+        /* if we are here and ct->ins->debug_info.last_chunk_written is empty
+        * it means that the event did not result in any new bytes read from the 
+        * file and/or bytes were not added to a chunk. Free the memory
+        */
+        if (ctx->ins->debug_info.last_file_segment != NULL && ctx->ins->debug_info.last_chunk_written == NULL) {
+            flb_free(ctx->ins->debug_info.last_file_segment);
+        }
+        // Reset for next segment
+        ctx->ins->debug_info.last_file_segment = NULL;
+        ctx->ins->debug_info.last_chunk_written = NULL;
+#endif    
+    
     if (ret != FLB_TAIL_ERROR) {
         /*
          * Due to read buffer size capacity, there are some cases where the

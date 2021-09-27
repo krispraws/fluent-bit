@@ -55,7 +55,28 @@ struct flb_input_chunk {
     uint64_t routes_mask
         [FLB_ROUTES_MASK_ELEMENTS]; /* track the output plugins the chunk routes to */
     struct mk_list _head;
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+    int num_segments;
+    struct mk_list segments; /* Linked list of flb_input_file_segment in this chunk */
+#endif
 };
+
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+struct flb_input_file_segment {
+    uint64_t file_inode;
+    int file_fd;
+    int pending_signal;
+    double inotify_time;
+    double file_mtime;
+    double read_time;
+    double pack_time;
+    int num_bytes;
+    int num_records;
+    char first_log_record[64];
+    struct flb_input_chunk *ic;
+    struct mk_list _head;
+};
+#endif
 
 struct flb_input_chunk *flb_input_chunk_create(struct flb_input_instance *in,
                                                const char *tag, int tag_len);

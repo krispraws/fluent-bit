@@ -89,6 +89,18 @@ static int in_tail_collect_pending(struct flb_input_instance *ins,
         }
 
         ret = flb_tail_file_chunk(file);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW
+        /* if we are here and ct->ins->debug_info.last_chunk_written is empty
+        * it means that the event did not result in any new bytes read from the 
+        * file and/or bytes were not added to a chunk. Free the memory
+        */
+        if (ctx->ins->debug_info.last_file_segment != NULL && ctx->ins->debug_info.last_chunk_written == NULL) {
+            flb_free(ctx->ins->debug_info.last_file_segment);
+        }
+        // Reset for next segment
+        ctx->ins->debug_info.last_file_segment = NULL;
+        ctx->ins->debug_info.last_chunk_written = NULL; 
+#endif        
         switch (ret) {
         case FLB_TAIL_ERROR:
             /* Could not longer read the file */
@@ -138,6 +150,18 @@ static int in_tail_collect_static(struct flb_input_instance *ins,
         file = mk_list_entry(head, struct flb_tail_file, _head);
 
         ret = flb_tail_file_chunk(file);
+#ifdef FLB_HAVE_TRACE_DATA_FLOW        
+        /* if we are here and ct->ins->debug_info.last_chunk_written is empty
+        * it means that the event did not result in any new bytes read from the 
+        * file and/or bytes were not added to a chunk. Free the memory
+        */
+        if (ctx->ins->debug_info.last_file_segment != NULL && ctx->ins->debug_info.last_chunk_written == NULL) {
+            flb_free(ctx->ins->debug_info.last_file_segment);
+        }
+        // Reset for next segment
+        ctx->ins->debug_info.last_file_segment = NULL;
+        ctx->ins->debug_info.last_chunk_written = NULL;
+#endif                
         switch (ret) {
         case FLB_TAIL_ERROR:
             /* Could not longer read the file */
@@ -418,6 +442,7 @@ static int in_tail_exit(void *data, struct flb_config *config)
 static void in_tail_pause(void *data, struct flb_config *config)
 {
     struct flb_tail_config *ctx = data;
+    flb_debug("[tail][data_trace] in_tail_pause: pausing collectors");
 
     /*
      * Pause general collectors:
@@ -450,7 +475,7 @@ static void in_tail_pause(void *data, struct flb_config *config)
 static void in_tail_resume(void *data, struct flb_config *config)
 {
     struct flb_tail_config *ctx = data;
-
+    flb_debug("[tail][data_trace] in_tail_resume: resuming collectors, last_pending=%ld", ctx->last_pending);
     flb_input_collector_resume(ctx->coll_fd_static, ctx->ins);
     flb_input_collector_resume(ctx->coll_fd_pending, ctx->ins);
 
@@ -462,7 +487,7 @@ static void in_tail_resume(void *data, struct flb_config *config)
         flb_input_collector_resume(ctx->coll_fd_mult_flush, ctx->ins);
     }
 
-    /* Pause file system backend handlers */
+    /* Resume file system backend handlers */
     flb_tail_fs_resume(ctx);
 }
 
