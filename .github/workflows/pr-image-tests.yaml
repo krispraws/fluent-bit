@@ -12,7 +12,7 @@ jobs:
       outputs:
         latest_tag: ${{ steps.formatted_version.outputs.replaced }}
       steps:
-        - uses: actions/checkout@v2
+        - uses: actions/checkout@v3
         - uses: actions-ecosystem/action-get-latest-tag@v1
           id: get-latest-tag
           with:
